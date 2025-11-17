@@ -19,7 +19,7 @@
             cursor: move; /* Indicate dragging behavior */
             touch-action: none; /* Disable default touch actions */
         }
-        /* REDUCED WIDTH HERE */
+        /* Adjusted width for consistent control labels */
         .control-label {
             min-width: 120px;
         }
@@ -35,16 +35,24 @@
 </head>
 <body class="p-4 md:p-8 flex flex-col h-screen">
 
-    <!-- REDUCED MARGIN --><h1 class="text-3xl font-extrabold text-center mb-2 text-white">
+    <h1 class="text-3xl font-extrabold text-center mb-2 text-white">
         Flock Simulation (Sunset Murmuration)
     </h1>
 
-    <!-- Flocking Controls - REDUCED PADDING, SPACING, AND MARGIN --><div class="flex flex-wrap items-center justify-center space-y-2 md:space-y-0 md:space-x-4 mb-3 p-3 bg-gray-700/50 rounded-xl shadow-lg">
+    <!-- Flocking Controls - REDUCED PADDING, SPACING, AND MARGIN -->
+    <div class="flex flex-wrap items-center justify-center space-y-2 md:space-y-0 md:space-x-4 mb-3 p-3 bg-gray-700/50 rounded-xl shadow-lg">
         
-        <!-- Bird Count Slider --><div class="flex items-center space-x-3 w-full md:w-auto">
+        <!-- Bird Count Slider -->
+        <div class="flex items-center space-x-3 w-full md:w-auto">
             <label for="birdCount" class="control-label text-sm font-medium">Bird Count (<span id="arrivedCount" class="text-green-400 font-bold">0</span> Roosted):</label>
             <input type="range" id="birdCount" min="1" max="500" value="100" class="w-full h-2 bg-gray-500 rounded-lg appearance-none cursor-pointer range-lg">
             <span id="currentBirdCount" class="text-lg font-bold w-12 text-right">100</span>
+        </div>
+
+        <!-- Birds per Peel Input (New Control) -->
+        <div class="flex items-center space-x-3 w-full md:w-auto">
+            <label for="peelCount" class="control-label text-sm font-medium">Birds per Peel:</label>
+            <input type="number" id="peelCount" min="1" max="10" value="3" class="w-16 bg-gray-600 rounded-lg text-center p-1 text-sm focus:ring-blue-500 focus:border-blue-500">
         </div>
 
         <!-- Button Group: Add and Reset -->
@@ -58,32 +66,41 @@
                 Reset Simulation
             </button>
         </div>
+    </div>
 
-        <!-- Cohesion Slider --><div class="flex items-center space-x-3 w-full md:w-auto">
+    <!-- Rule Sliders -->
+    <div class="flex flex-wrap items-center justify-center space-y-2 md:space-y-0 md:space-x-4 mb-3 p-3 bg-gray-700/50 rounded-xl shadow-lg">
+        <!-- Cohesion Slider -->
+        <div class="flex items-center space-x-3 w-full md:w-auto">
             <label for="cohesionFactor" class="control-label text-sm font-medium">Cohesion:</label>
             <input type="range" id="cohesionFactor" min="0" max="2" step="0.05" value="1" class="w-full h-2 bg-gray-500 rounded-lg appearance-none cursor-pointer">
         </div>
 
-        <!-- Separation Slider --><div class="flex items-center space-x-3 w-full md:w-auto">
+        <!-- Separation Slider -->
+        <div class="flex items-center space-x-3 w-full md:w-auto">
             <label for="separationFactor" class="control-label text-sm font-medium">Separation:</label>
             <input type="range" id="separationFactor" min="0" max="2" step="0.05" value="1.5" class="w-full h-2 bg-gray-500 rounded-lg appearance-none cursor-pointer">
         </div>
 
-        <!-- Alignment Slider --><div class="flex items-center space-x-3 w-full md:w-auto">
+        <!-- Alignment Slider -->
+        <div class="flex items-center space-x-3 w-full md:w-auto">
             <label for="alignmentFactor" class="control-label text-sm font-medium">Alignment:</label>
             <input type="range" id="alignmentFactor" min="0" max="2" step="0.05" value="1" class="w-full h-2 bg-gray-500 rounded-lg appearance-none cursor-pointer">
         </div>
     </div>
     
-    <!-- Wind Controls - REDUCED PADDING, SPACING, AND MARGIN --><div class="flex flex-wrap items-center justify-center space-y-2 md:space-y-0 md:space-x-4 mb-3 p-3 bg-gray-700/50 rounded-xl shadow-lg">
-        <!-- Removed h2 margin for more space --><h2 class="text-xl font-semibold">Wind Settings:</h2>
+    <!-- Wind Controls -->
+    <div class="flex flex-wrap items-center justify-center space-y-2 md:space-y-0 md:space-x-4 mb-3 p-3 bg-gray-700/50 rounded-xl shadow-lg">
+        <h2 class="text-xl font-semibold">Wind Settings:</h2>
         
-        <!-- Wind Speed Input --><div class="flex items-center space-x-3 w-full md:w-auto">
+        <!-- Wind Speed Input -->
+        <div class="flex items-center space-x-3 w-full md:w-auto">
             <label for="windSpeed" class="control-label text-sm font-medium">Speed (Knots):</label>
             <input type="number" id="windSpeed" min="0" max="20" value="0" class="w-20 bg-gray-600 rounded-lg text-center p-1 text-sm focus:ring-blue-500 focus:border-blue-500">
         </div>
         
-        <!-- Wind Direction Selection --><div class="flex items-center space-x-4 w-full md:w-auto">
+        <!-- Wind Direction Selection -->
+        <div class="flex items-center space-x-4 w-full md:w-auto">
             <label class="control-label text-sm font-medium">Wind Origin:</label>
             <div class="flex space-x-3">
                 <label class="inline-flex items-center cursor-pointer">
@@ -98,7 +115,8 @@
         </div>
     </div>
 
-    <!-- Canvas Container --><div id="canvas-container" class="flex-grow min-h-0">
+    <!-- Canvas Container -->
+    <div id="canvas-container" class="flex-grow min-h-0">
         <canvas id="simulationCanvas" class="w-full h-full"></canvas>
     </div>
 
@@ -119,6 +137,7 @@
         const windFromRightInput = document.getElementById('windFromRight');
         const addBirdsButton = document.getElementById('addBirdsButton'); 
         const resetButton = document.getElementById('resetButton'); 
+        const peelCountInput = document.getElementById('peelCount'); // New input reference
 
         // Physics constants
         const MAX_SPEED = 2.5; 
@@ -137,15 +156,11 @@
 
         // Constants for Flocking/Roosting Behavior
         const FLOCK_SETTLE_DELAY_MS = 5000; 
-        // Massive radius for flock formation around the roosting site
         const ROOST_GOAL_RADIUS = 8000; 
-        // Force applied to the flocking center to pull it toward the roost
-        const ROOST_GOAL_FORCE_MULTIPLIER = 0.02; // Keeps the dense flock centered over the tree
-        const BASE_SEPARATION_DISTANCE_MULTIPLIER = 4; // Base multiplier for bird radius
-        // Multiplier for massive, dispersed holding pattern - set to 30
-        const HOLDING_SEPARATION_MULTIPLIER = 1.875; // HALVED from 3.75 to 1.875
-        // Factor to slow down birds once the main flock has formed (speed remains MAX_SPEED)
-        const FLOCKING_SPEED_REDUCTION_FACTOR = 1.0; 
+        const ROOST_GOAL_FORCE_MULTIPLIER = 0.04; 
+        const BASE_SEPARATION_DISTANCE_MULTIPLIER = 4; 
+        const HOLDING_SEPARATION_MULTIPLIER = 1.875; 
+        const FLOCKING_SPEED_REDUCTION_FACTOR = 0.8; 
 
         // --- Tree/Roosting Shape Constants and Variables ---
         const TRUNK_WIDTH = 16;
@@ -456,7 +471,6 @@
                             roostGoal = steering;
                         }
                     }
-                    // *** CENTRAL CORRIDOR CONSTRAINT REMOVED HERE ***
                 }
 
                 // 3. Apply general forces
@@ -648,19 +662,42 @@
             requestAnimationFrame(loop);
         }
 
-        // Function to manage the sequential roosting process
+        /**
+         * Function to manage the sequential roosting process.
+         * Dynamically reads the number of birds to peel off from the UI input.
+         */
         function startRoostingPeel() {
             if (peelInterval !== null) return; 
 
             peelInterval = setInterval(() => {
                 const flockingBirds = birds.filter(b => b.roostingState === 'FLOCKING');
+                
+                // Get the current peel count from the input, defaulting to 1 if invalid
+                const peelCount = parseInt(peelCountInput.value) || 1; 
 
                 if (flockingBirds.length > 0) {
-                    const birdToRoost = flockingBirds[Math.floor(Math.random() * flockingBirds.length)];
+                    // Select up to `peelCount` birds to start roosting
+                    const birdsToSelectCount = Math.min(peelCount, flockingBirds.length);
                     
-                    // Assign a unique random target spot for this bird based on tree shape
-                    birdToRoost.roostTarget = generateRoostTarget();
-                    birdToRoost.roostingState = 'ROOSTING';
+                    const selectedIndices = new Set();
+                    const birdsToRoost = [];
+
+                    for (let i = 0; i < birdsToSelectCount; i++) {
+                        let randomIndex;
+                        // Ensure we don't pick the same bird twice in the same interval
+                        do {
+                            randomIndex = Math.floor(Math.random() * flockingBirds.length);
+                        } while (selectedIndices.has(randomIndex));
+
+                        selectedIndices.add(randomIndex);
+                        birdsToRoost.push(flockingBirds[randomIndex]);
+                    }
+
+                    for (const birdToRoost of birdsToRoost) {
+                        // Assign a unique random target spot for this bird based on tree shape
+                        birdToRoost.roostTarget = generateRoostTarget();
+                        birdToRoost.roostingState = 'ROOSTING';
+                    }
 
                 } else if (birds.length > 0 && birds.every(b => b.roostingState !== 'ROOSTING')) {
                     // All birds are either ROOSTED or are currently ROOSTING. If none are ROOSTING, they must all be ROOSTED.
@@ -867,6 +904,8 @@
         birdCountInput.addEventListener('input', handleBirdCountChange);
         addBirdsButton.addEventListener('click', increaseTargetCount); 
         resetButton.addEventListener('click', resetSimulation); 
+
+        // No need for a change listener on peelCountInput, as startRoostingPeel reads the value dynamically every interval.
 
         // Mouse/Touch Listeners for Attraction
         canvas.addEventListener('mousedown', handleStart);
