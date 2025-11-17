@@ -47,9 +47,17 @@
             <span id="currentBirdCount" class="text-lg font-bold w-12 text-right">100</span>
         </div>
 
-        <!-- Button --><button id="addBirdsButton" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition duration-150 ease-in-out">
-            +25 Birds (Start Arrival)
-        </button>
+        <!-- Button Group: Add and Reset -->
+        <div class="flex space-x-4">
+            <!-- Add Birds Button -->
+            <button id="addBirdsButton" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition duration-150 ease-in-out">
+                +25 Birds (Start Arrival)
+            </button>
+            <!-- Reset Button -->
+            <button id="resetButton" class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-lg shadow-md transition duration-150 ease-in-out">
+                Reset Simulation
+            </button>
+        </div>
 
         <!-- Cohesion Slider --><div class="flex items-center space-x-3 w-full md:w-auto">
             <label for="cohesionFactor" class="control-label text-sm font-medium">Cohesion:</label>
@@ -110,6 +118,7 @@
         const windFromLeftInput = document.getElementById('windFromLeft');
         const windFromRightInput = document.getElementById('windFromRight');
         const addBirdsButton = document.getElementById('addBirdsButton'); 
+        const resetButton = document.getElementById('resetButton'); 
 
         // Physics constants
         const MAX_SPEED = 2.5; 
@@ -124,15 +133,19 @@
         const WIND_SCALE_FACTOR = 0.005; 
         const ARRIVAL_SLOW_RADIUS = 100; 
         const INSTANT_ADD_COUNT = 25; 
+        const INITIAL_BIRD_COUNT = 100; // Define initial count for easy reset
 
         // Constants for Flocking/Roosting Behavior
         const FLOCK_SETTLE_DELAY_MS = 5000; 
-        // UPDATED: Massive radius for flock formation around the roosting site
-        const ROOST_GOAL_RADIUS = 3000; 
-        const ROOST_GOAL_FORCE_MULTIPLIER = 0.4; 
+        // Massive radius for flock formation around the roosting site
+        const ROOST_GOAL_RADIUS = 8000; 
+        // Force applied to the flocking center to pull it toward the roost
+        const ROOST_GOAL_FORCE_MULTIPLIER = 0.02; // Keeps the dense flock centered over the tree
         const BASE_SEPARATION_DISTANCE_MULTIPLIER = 4; // Base multiplier for bird radius
-        // UPDATED: Multiplier is now 27 (9 * 3) for extremely wide holding pattern
-        const HOLDING_SEPARATION_MULTIPLIER = 27; 
+        // Multiplier for massive, dispersed holding pattern - set to 30
+        const HOLDING_SEPARATION_MULTIPLIER = 1.875; // HALVED from 3.75 to 1.875
+        // Factor to slow down birds once the main flock has formed (speed remains MAX_SPEED)
+        const FLOCKING_SPEED_REDUCTION_FACTOR = 1.0; 
 
         // --- Tree/Roosting Shape Constants and Variables ---
         const TRUNK_WIDTH = 16;
@@ -197,7 +210,7 @@
         let additionInterval = null; 
         let peelInterval = null; 
         let settleTimeout = null; 
-        let targetBirdCount = 100;
+        let targetBirdCount = INITIAL_BIRD_COUNT;
         let isFlockFormed = false; 
         let roostingSite = new Vector(0, 0); 
 
@@ -285,35 +298,61 @@
                 return steering;
             }
 
+            /**
+             * Calculates an aggressive, distance-based steering force to push birds away from the edges.
+             * This prevents them from getting stuck in corners.
+             */
             avoidEdges() {
-                let desired = null;
+                let steering = new Vector(0, 0);
                 const canvasWidth = canvas.width;
                 const canvasHeight = canvas.height;
-                const bottomMarginDistance = EDGE_MARGIN * BOTTOM_EDGE_MARGIN_MULTIPLIER;
+                const margin = EDGE_MARGIN;
+                const bottomMargin = margin * BOTTOM_EDGE_MARGIN_MULTIPLIER;
+                
+                // Increased max force contribution to make walls feel more "solid"
+                const maxForceContribution = 0.8; 
 
-                // Left Edge
-                if (this.position.x < EDGE_MARGIN) {
-                    desired = new Vector(MAX_SPEED, this.velocity.y); 
-                // Right Edge
-                } else if (this.position.x > canvasWidth - EDGE_MARGIN) {
-                    desired = new Vector(-MAX_SPEED, this.velocity.y); 
-                }
+                // Helper function to calculate avoidance force for one boundary
+                const calculateForce = (distance, maxDistance, desiredDirection) => {
+                    if (distance < maxDistance) {
+                        // Calculate strength: closer to 0 distance means closer to 1 strength
+                        const strength = 1 - (distance / maxDistance); 
+                        // Use strength squared to make the push exponential (very gentle far away, very strong close up)
+                        return desiredDirection.mult(maxForceContribution * strength * strength); 
+                    }
+                    return new Vector(0, 0);
+                };
 
-                // Top Edge
-                if (this.position.y < EDGE_MARGIN) {
-                    desired = new Vector(this.velocity.x, MAX_SPEED); 
-                // Bottom Edge (using the doubled margin)
-                } else if (this.position.y > canvasHeight - bottomMarginDistance) {
-                    desired = new Vector(this.velocity.x, -MAX_SPEED); 
-                }
+                // 1. Left Edge (push right)
+                steering = steering.add(calculateForce(
+                    this.position.x, 
+                    margin, 
+                    new Vector(1, 0)
+                ));
 
-                if (desired !== null) {
-                    let steering = desired.sub(this.velocity);
-                    // Increased limit for aggressive turning away from edges/corners
-                    steering = steering.limit(0.3); 
-                    return steering;
-                }
-                return new Vector(0, 0);
+                // 2. Right Edge (push left)
+                steering = steering.add(calculateForce(
+                    canvasWidth - this.position.x, 
+                    margin, 
+                    new Vector(-1, 0)
+                ));
+
+                // 3. Top Edge (push down)
+                steering = steering.add(calculateForce(
+                    this.position.y, 
+                    margin, 
+                    new Vector(0, 1)
+                ));
+
+                // 4. Bottom Edge (push up, using larger margin)
+                steering = steering.add(calculateForce(
+                    canvasHeight - this.position.y, 
+                    bottomMargin, 
+                    new Vector(0, -1)
+                ));
+                
+                // Limit the overall steering force (increased from 0.4 to 0.6 for better corner rejection)
+                return steering.limit(0.6); 
             }
 
             seekAttraction(target) {
@@ -386,7 +425,7 @@
                 let sepDistanceMultiplier = 1;
                 const BASE_SEPARATION_DISTANCE = this.radius * BASE_SEPARATION_DISTANCE_MULTIPLIER;
 
-                // When flock is formed and holding, triple the separation distance
+                // When flock is formed and holding, use the massive separation distance
                 if (isFlockFormed) {
                     sepDistanceMultiplier = HOLDING_SEPARATION_MULTIPLIER; 
                 }
@@ -417,6 +456,7 @@
                             roostGoal = steering;
                         }
                     }
+                    // *** CENTRAL CORRIDOR CONSTRAINT REMOVED HERE ***
                 }
 
                 // 3. Apply general forces
@@ -435,7 +475,14 @@
                 }
                 
                 this.velocity = this.velocity.add(this.acceleration);
-                this.velocity = this.velocity.limit(MAX_SPEED);
+                
+                // Determine the maximum speed based on the flocking state (speed is modified here by the FLOCKING_SPEED_REDUCTION_FACTOR)
+                let currentMaxSpeed = MAX_SPEED;
+                if (isFlockFormed && this.roostingState === 'FLOCKING') {
+                    currentMaxSpeed = MAX_SPEED * FLOCKING_SPEED_REDUCTION_FACTOR; 
+                }
+
+                this.velocity = this.velocity.limit(currentMaxSpeed);
                 this.position = this.position.add(this.velocity);
                 this.acceleration = this.acceleration.mult(0); 
 
@@ -687,6 +734,37 @@
             handleBirdCountChange(); 
         }
 
+        /**
+         * Clears all birds, stops all timers, and resets the simulation to the initial state (100 birds).
+         */
+        function resetSimulation() {
+            // 1. Stop all intervals and timeouts
+            if (additionInterval) {
+                clearInterval(additionInterval);
+                additionInterval = null;
+            }
+            if (peelInterval) {
+                clearInterval(peelInterval);
+                peelInterval = null;
+            }
+            if (settleTimeout) {
+                clearTimeout(settleTimeout);
+                settleTimeout = null;
+            }
+            
+            // 2. Reset global state
+            birds = [];
+            isFlockFormed = false;
+            attractionPoint = null;
+
+            // 3. Reset UI controls and target count
+            birdCountInput.value = INITIAL_BIRD_COUNT;
+            targetBirdCount = INITIAL_BIRD_COUNT;
+            
+            // 4. Re-initialize the flock based on the reset count
+            handleBirdCountChange();
+        }
+
         // --- Event Handlers ---
 
         function handleBirdCountChange() {
@@ -788,6 +866,7 @@
         
         birdCountInput.addEventListener('input', handleBirdCountChange);
         addBirdsButton.addEventListener('click', increaseTargetCount); 
+        resetButton.addEventListener('click', resetSimulation); 
 
         // Mouse/Touch Listeners for Attraction
         canvas.addEventListener('mousedown', handleStart);
