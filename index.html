@@ -116,21 +116,35 @@
         const PERCEPTION_RADIUS = 50;
         const BIRD_SIZE = 2; 
         const EDGE_MARGIN = 50; 
-        const BOTTOM_EDGE_MARGIN_MULTIPLIER = 2; // Multiplier for the bottom edge boundary (Requested in previous turn)
+        const BOTTOM_EDGE_MARGIN_MULTIPLIER = 2; 
         const ARRIVAL_INTERVAL_MS = 310; 
-        const ROOST_TARGET_FORCE = 0.15; // Force for roosting (Requested to be faster)
-        const ROOST_STOPPING_RADIUS = 10; // New: Distance from roosting site to stop
-        const ROOST_PEEL_INTERVAL_MS = 1000; // New: Time between birds peeling off
+        const ROOST_TARGET_FORCE = 0.15; 
+        const ROOST_STOPPING_RADIUS = 10; 
+        const ROOST_PEEL_INTERVAL_MS = 1000; 
         const WIND_SCALE_FACTOR = 0.005; 
         const ARRIVAL_SLOW_RADIUS = 100; 
         const INSTANT_ADD_COUNT = 25; 
 
-        // NEW Roost Goal Constants
-        const ROOST_GOAL_RADIUS = 250; // Distance from roosting site where flock starts feeling the pull
-        const ROOST_GOAL_FORCE_MULTIPLIER = 0.05; // Gentle pull towards the tree
+        // Constants for Flocking/Roosting Behavior
+        const FLOCK_SETTLE_DELAY_MS = 5000; 
+        // UPDATED: Massive radius for flock formation around the roosting site
+        const ROOST_GOAL_RADIUS = 3000; 
+        const ROOST_GOAL_FORCE_MULTIPLIER = 0.4; 
+        const BASE_SEPARATION_DISTANCE_MULTIPLIER = 4; // Base multiplier for bird radius
+        const HOLDING_SEPARATION_MULTIPLIER = 3; // New multiplier for separation distance when flock is formed
+
+        // --- Tree/Roosting Shape Constants and Variables ---
+        const TRUNK_WIDTH = 16;
+        const CANOPY_RADIUS = 40;
+        const TREE_HEIGHT = 100;
+        const TREE_BASE_Y_OFFSET = 50;
+        
+        let treeCenterX = 0;
+        let canopyCenterY = 0;
+        let treeBaseY = 0;
+        // ---------------------------------------------------
 
         // Utility: Vector Class (simple implementation)
-        // MOVED CLASS DEFINITION TO THE TOP TO AVOID REFERENCE ERROR
         class Vector {
             constructor(x, y) {
                 this.x = x || 0;
@@ -181,6 +195,7 @@
         let attractionPoint = null; 
         let additionInterval = null; 
         let peelInterval = null; 
+        let settleTimeout = null; 
         let targetBirdCount = 100;
         let isFlockFormed = false; 
         let roostingSite = new Vector(0, 0); 
@@ -195,14 +210,12 @@
                 this.color = '#FFFFFF'; // White silhouette
                 this.radius = BIRD_SIZE;
                 this.roostingState = 'FLOCKING'; // 'FLOCKING', 'ROOSTING', or 'ROOSTED'
+                this.roostTarget = null; // Unique landing spot for this bird
             }
 
             getNeighbors(birds) {
                 const neighbors = [];
-                // Only consider birds that are still actively flocking
                 for (let other of birds) {
-                    // Include 'ROOSTING' birds in neighbors to prevent collisions, 
-                    // but exclude 'ROOSTED' as they are stationary and just part of the environment.
                     if (other !== this && other.roostingState !== 'ROOSTED') { 
                         const distance = this.position.sub(other.position).mag();
                         if (distance < PERCEPTION_RADIUS) {
@@ -227,13 +240,20 @@
                 return steering;
             }
 
-            separation(neighbors, factor) {
+            /**
+             * Calculates separation force.
+             * @param {Array<Bird>} neighbors - Nearby birds.
+             * @param {number} factor - User-defined separation strength.
+             * @param {number} separationDistance - The distance threshold for feeling separation force.
+             */
+            separation(neighbors, factor, separationDistance) {
                 let steering = new Vector(0, 0);
                 let total = 0;
 
                 for (let other of neighbors) {
                     const distance = this.position.sub(other.position).mag();
-                    if (distance > 0 && distance < this.radius * 4) { 
+                    // Use the dynamic separationDistance
+                    if (distance > 0 && distance < separationDistance) { 
                         let diff = this.position.sub(other.position);
                         diff = diff.normalize().div(distance * distance); 
                         steering = steering.add(diff);
@@ -288,7 +308,8 @@
 
                 if (desired !== null) {
                     let steering = desired.sub(this.velocity);
-                    steering = steering.limit(0.15); 
+                    // Increased limit for aggressive turning away from edges/corners
+                    steering = steering.limit(0.3); 
                     return steering;
                 }
                 return new Vector(0, 0);
@@ -310,36 +331,83 @@
             }
 
             flock(allBirds) {
-                // If a bird has roosted, it is completely static
+                // 1. Static check
                 if (this.roostingState === 'ROOSTED') {
                     this.velocity = new Vector(0, 0);
                     this.acceleration = new Vector(0, 0);
                     return; 
                 }
 
+                // 4. Roosting Force (Override for the selected bird)
+                if (this.roostingState === 'ROOSTING' && this.roostTarget) {
+                    // This state completely overrides the flocking behavior
+                    let desired = this.roostTarget.sub(this.position);
+                    const distance = desired.mag(); 
+                    
+                    if (distance < ROOST_STOPPING_RADIUS) {
+                        this.roostingState = 'ROOSTED';
+                        this.velocity = new Vector(0, 0);
+                        this.acceleration = new Vector(0, 0);
+                        this.color = '#AAAAAA'; 
+                        updateArrivedCount(); 
+                        return;
+                    }
+
+                    if (distance > 0) {
+                        desired = desired.normalize(); 
+                        
+                        let speed = MAX_SPEED;
+                        if (distance < ARRIVAL_SLOW_RADIUS) {
+                            speed = MAX_SPEED * (distance / ARRIVAL_SLOW_RADIUS);
+                        }
+
+                        desired = desired.mult(speed); 
+                        
+                        let steering = desired.sub(this.velocity);
+                        steering = steering.limit(ROOST_TARGET_FORCE);
+                        
+                        // Clear all previous accumulation and apply ONLY the steering toward the roost
+                        this.acceleration = new Vector(0, 0);
+                        this.applyForce(steering);
+                    }
+                    return; // Crucial: skip flocking logic when roosting
+                }
+
+
+                // --- FLOCKING LOGIC APPLIES HERE ---
+
                 const neighbors = this.getNeighbors(allBirds);
                 const cohesionFactor = parseFloat(cohesionFactorInput.value);
                 const separationFactor = parseFloat(separationFactorInput.value);
                 const alignmentFactor = parseFloat(alignmentFactorInput.value);
 
-                const sep = this.separation(neighbors, separationFactor);
+                // Determine separation distance multiplier
+                let sepDistanceMultiplier = 1;
+                const BASE_SEPARATION_DISTANCE = this.radius * BASE_SEPARATION_DISTANCE_MULTIPLIER;
+
+                // When flock is formed and holding, triple the separation distance
+                if (isFlockFormed) {
+                    sepDistanceMultiplier = HOLDING_SEPARATION_MULTIPLIER; 
+                }
+                const actualSeparationDistance = BASE_SEPARATION_DISTANCE * sepDistanceMultiplier;
+
+                const sep = this.separation(neighbors, separationFactor, actualSeparationDistance);
                 const coh = this.cohesion(neighbors, cohesionFactor);
                 const ali = this.alignment(neighbors, alignmentFactor);
                 const edgeAvoidance = this.avoidEdges(); 
                 const attraction = this.seekAttraction(attractionPoint);
                 const windForce = calculateWindForce();
 
-                // 6. NEW: Roost Goal Force (Applies only if the bird is not actively peeling off)
+                // 2. Roost Goal Force (Applies only if the bird is actively FLOCKING)
                 let roostGoal = new Vector(0, 0);
-                if (this.roostingState === 'FLOCKING' && isFlockFormed) {
+                if (isFlockFormed) {
                     const flockCenter = getFlockingCenter();
                     if (flockCenter) {
                         const distanceToRoost = flockCenter.sub(roostingSite).mag();
                         
                         if (distanceToRoost < ROOST_GOAL_RADIUS) {
                             let desired = roostingSite.sub(this.position);
-                            // Scale the pull strength based on how close the flock is to the goal radius boundary
-                            const goalStrength = 1 - (distanceToRoost / ROOST_GOAL_RADIUS); // 1 when at center, 0 when at edge
+                            const goalStrength = 1 - (distanceToRoost / ROOST_GOAL_RADIUS); 
 
                             desired = desired.setMag(MAX_SPEED * goalStrength);
                             
@@ -350,7 +418,7 @@
                     }
                 }
 
-                // Apply general forces
+                // 3. Apply general forces
                 this.applyForce(sep);
                 this.applyForce(coh);
                 this.applyForce(ali);
@@ -358,47 +426,9 @@
                 this.applyForce(attraction);
                 this.applyForce(windForce);
                 this.applyForce(roostGoal);
-
-
-                // 7. Roosting Force - APPLIED ONLY TO THE SELECTED BIRD ('ROOSTING' state)
-                if (this.roostingState === 'ROOSTING') {
-                    let desired = roostingSite.sub(this.position);
-                    const distance = desired.mag(); 
-                    
-                    if (distance < ROOST_STOPPING_RADIUS) {
-                        // Roosted: Stop and mark as complete
-                        this.roostingState = 'ROOSTED';
-                        this.velocity = new Vector(0, 0);
-                        this.acceleration = new Vector(0, 0);
-                        this.color = '#AAAAAA'; // Greyed out color for roosted birds
-                        updateArrivedCount(); // Update the UI counter
-                        return;
-                    }
-
-                    if (distance > 0) {
-                        desired = desired.normalize(); 
-                        
-                        let speed = MAX_SPEED;
-                        // Slow down as it approaches the site
-                        if (distance < ARRIVAL_SLOW_RADIUS) {
-                            speed = MAX_SPEED * (distance / ARRIVAL_SLOW_RADIUS);
-                        }
-
-                        desired = desired.mult(speed); 
-                        
-                        let steering = desired.sub(this.velocity);
-                        // Use the strong ROOST_TARGET_FORCE to make it peel off quickly
-                        steering = steering.limit(ROOST_TARGET_FORCE);
-                        
-                        // Clear all previous accumulation and apply ONLY the steering toward the roost
-                        this.acceleration = new Vector(0, 0);
-                        this.applyForce(steering);
-                    }
-                }
             }
 
             update() {
-                // Roosted birds don't need to update physics
                 if (this.roostingState === 'ROOSTED') {
                     return;
                 }
@@ -408,16 +438,14 @@
                 this.position = this.position.add(this.velocity);
                 this.acceleration = this.acceleration.mult(0); 
 
-                // Simple boundary clipping (though avoidEdges should handle steering)
                 this.position.x = Math.max(0, Math.min(canvas.width, this.position.x));
                 this.position.y = Math.max(0, Math.min(canvas.height, this.position.y));
             }
 
             draw() {
-                // Roosted birds are static, so the angle calculation only applies to moving birds
                 const angle = this.roostingState === 'FLOCKING' || this.roostingState === 'ROOSTING' 
                     ? Math.atan2(this.velocity.y, this.velocity.x) 
-                    : 0; // No rotation for roosted birds
+                    : 0; 
                 
                 const size = this.radius * 2.5; 
                 const width = this.radius * 1.5; 
@@ -428,7 +456,6 @@
 
                 ctx.beginPath();
                 
-                // Draw a simple dot for roosted birds, V-shape for moving birds
                 if (this.roostingState === 'ROOSTED') {
                     ctx.arc(0, 0, this.radius + 0.5, 0, Math.PI * 2);
                     ctx.fillStyle = this.color; 
@@ -451,8 +478,38 @@
         // --- Core Simulation Functions ---
 
         /**
+         * Generates a random target vector that falls within the visual shape of the tree (Canopy or Trunk).
+         */
+        function generateRoostTarget() {
+            // 60% chance to land in canopy, 40% in trunk
+            if (Math.random() < 0.6) {
+                // --- Canopy Landing (Circle centered at canopyCenterY) ---
+                // Find a random point within the canopy circle
+                let angle = Math.random() * Math.PI * 2;
+                let radius = Math.random() * CANOPY_RADIUS * 0.8; // Use 80% of radius to keep off the edge
+                
+                let offsetX = Math.cos(angle) * radius;
+                let offsetY = Math.sin(angle) * radius;
+                
+                return new Vector(treeCenterX + offsetX, canopyCenterY + offsetY);
+
+            } else {
+                // --- Trunk Landing (Rectangle from canopy base down to tree base) ---
+                // X: within trunk width
+                let x = treeCenterX + (Math.random() * TRUNK_WIDTH - TRUNK_WIDTH / 2);
+                
+                // Y: between canopy center Y (top of trunk area) and treeBaseY (bottom)
+                let yMin = canopyCenterY; 
+                let yMax = treeBaseY;
+                
+                let y = yMin + (Math.random() * (yMax - yMin));
+
+                return new Vector(x, y);
+            }
+        }
+
+        /**
          * Calculates the center of mass for all birds currently active (FLOCKING or ROOSTING).
-         * This is used to determine the flock's collective position relative to the roosting site.
          */
         function getFlockingCenter() {
             let center = new Vector(0, 0);
@@ -476,16 +533,15 @@
             canvas.width = rect.width;
             canvas.height = rect.height;
 
-            // Tree Constants
-            const TRUNK_WIDTH = 16;
-            const CANOPY_RADIUS = 40;
-            const TREE_HEIGHT = 100;
-            const TREE_BASE_Y_OFFSET = 50;
+            // Update Tree Coordinates
+            treeBaseY = canvas.height - TREE_BASE_Y_OFFSET;
+            treeCenterX = canvas.width / 2;
+            canopyCenterY = treeBaseY - TREE_HEIGHT * 0.3;
 
-            // Roosting site is the center of the canopy, horizontally centered on the canvas
+            // Roosting site is the center of the canopy, used as the main flock attraction point
             roostingSite = new Vector(
-                canvas.width / 2, 
-                canvas.height - TREE_BASE_Y_OFFSET - (TREE_HEIGHT * 0.3) + CANOPY_RADIUS / 4 
+                treeCenterX, 
+                canopyCenterY + CANOPY_RADIUS / 4 // Adjusting slightly lower for better flock approach
             ); 
         }
 
@@ -500,21 +556,15 @@
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             // --- Roosting Tree Drawing (Horizontal Center, Bottom) ---
-            const TRUNK_WIDTH = 16;
-            const CANOPY_RADIUS = 40;
-            const TREE_HEIGHT = 100;
-            const TREE_BASE_Y_OFFSET = 50;
-
-            const treeBaseY = canvas.height - TREE_BASE_Y_OFFSET;
-            const treeCenterX = canvas.width / 2;
             
             // Draw Trunk
             ctx.fillStyle = '#452a1a'; // Brown
+            // Uses the globally calculated treeCenterX and treeBaseY
             ctx.fillRect(treeCenterX - TRUNK_WIDTH / 2, treeBaseY, TRUNK_WIDTH, -TREE_HEIGHT * 0.3);
 
             // Draw Canopy
             ctx.beginPath();
-            ctx.arc(treeCenterX, treeBaseY - TREE_HEIGHT * 0.3, CANOPY_RADIUS, 0, Math.PI * 2);
+            ctx.arc(treeCenterX, canopyCenterY, CANOPY_RADIUS, 0, Math.PI * 2);
             ctx.fillStyle = '#1e381b'; // Dark Green/Brownish for sunset tree
             ctx.fill();
             ctx.closePath();
@@ -550,19 +600,18 @@
             requestAnimationFrame(loop);
         }
 
-        // NEW: Function to manage the sequential roosting process
+        // Function to manage the sequential roosting process
         function startRoostingPeel() {
             if (peelInterval !== null) return; 
 
             peelInterval = setInterval(() => {
-                // Find all birds that are still FLOCKING 
                 const flockingBirds = birds.filter(b => b.roostingState === 'FLOCKING');
 
                 if (flockingBirds.length > 0) {
-                    // Select a random bird from the active flock
                     const birdToRoost = flockingBirds[Math.floor(Math.random() * flockingBirds.length)];
                     
-                    // Set its state to ROOSTING, initiating the peel-off
+                    // Assign a unique random target spot for this bird based on tree shape
+                    birdToRoost.roostTarget = generateRoostTarget();
                     birdToRoost.roostingState = 'ROOSTING';
 
                 } else if (birds.length > 0 && birds.every(b => b.roostingState !== 'ROOSTING')) {
@@ -573,7 +622,7 @@
             }, ROOST_PEEL_INTERVAL_MS);
         }
 
-        // NEW: Function to update the roosted bird counter
+        // Function to update the roosted bird counter
         function updateArrivedCount() {
             const roostedCount = birds.filter(b => b.roostingState === 'ROOSTED').length;
             arrivedCountSpan.textContent = `${roostedCount}`;
@@ -609,12 +658,18 @@
                 birds.push(newBird);
 
             } else {
+                // All birds have arrived
                 clearInterval(additionInterval);
                 additionInterval = null;
-                isFlockFormed = true; 
                 
-                // Start the peeling off process once the main flock has arrived
-                startRoostingPeel();
+                // NEW: Wait for the flock to settle before starting the roosting peel
+                if (settleTimeout) clearTimeout(settleTimeout);
+                
+                settleTimeout = setTimeout(() => {
+                    isFlockFormed = true; 
+                    startRoostingPeel();
+                    settleTimeout = null;
+                }, FLOCK_SETTLE_DELAY_MS);
             }
         }
         
@@ -639,6 +694,12 @@
             
             targetBirdCount = newCount;
             
+            // Clear any pending settling timer
+            if (settleTimeout) {
+                clearTimeout(settleTimeout);
+                settleTimeout = null;
+            }
+
             if (targetBirdCount < birds.length) {
                 // If the target is lowered, immediately stop peeling and reset
                 if (additionInterval) {
@@ -657,6 +718,7 @@
                 birds.forEach(b => { 
                     b.roostingState = 'FLOCKING'; 
                     b.color = '#FFFFFF';
+                    b.roostTarget = null;
                 });
 
                 updateArrivedCount();
@@ -674,8 +736,13 @@
                 // Stop arrival if slider hits current count
                 clearInterval(additionInterval);
                 additionInterval = null;
-                isFlockFormed = true;
-                startRoostingPeel();
+                // Since the count matches, start the settling timeout
+                if (settleTimeout) clearTimeout(settleTimeout); 
+                settleTimeout = setTimeout(() => {
+                    isFlockFormed = true; 
+                    startRoostingPeel();
+                    settleTimeout = null;
+                }, FLOCK_SETTLE_DELAY_MS);
             }
             
             updateArrivedCount();
