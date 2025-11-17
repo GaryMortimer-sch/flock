@@ -1,0 +1,751 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bird Murmuration Simulator</title>
+    <!-- Load Tailwind CSS --><script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for the canvas and controls */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a; /* Deep Slate background for the environment */
+            color: #d1d5db;
+            overflow: hidden; /* Prevent body scroll */
+        }
+        #simulationCanvas {
+            border-radius: 0.75rem; /* Rounded corners */
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            cursor: move; /* Indicate dragging behavior */
+            touch-action: none; /* Disable default touch actions */
+        }
+        /* REDUCED WIDTH HERE */
+        .control-label {
+            min-width: 120px;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield; /* Firefox */
+        }
+        input::-webkit-outer-spin-button,
+        input::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8 flex flex-col h-screen">
+
+    <!-- REDUCED MARGIN --><h1 class="text-3xl font-extrabold text-center mb-2 text-white">
+        Flock Simulation (Sunset Murmuration)
+    </h1>
+
+    <!-- Flocking Controls - REDUCED PADDING, SPACING, AND MARGIN --><div class="flex flex-wrap items-center justify-center space-y-2 md:space-y-0 md:space-x-4 mb-3 p-3 bg-gray-700/50 rounded-xl shadow-lg">
+        
+        <!-- Bird Count Slider --><div class="flex items-center space-x-3 w-full md:w-auto">
+            <label for="birdCount" class="control-label text-sm font-medium">Bird Count (<span id="arrivedCount" class="text-green-400 font-bold">0</span> Roosted):</label>
+            <input type="range" id="birdCount" min="1" max="500" value="100" class="w-full h-2 bg-gray-500 rounded-lg appearance-none cursor-pointer range-lg">
+            <span id="currentBirdCount" class="text-lg font-bold w-12 text-right">100</span>
+        </div>
+
+        <!-- Button --><button id="addBirdsButton" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition duration-150 ease-in-out">
+            +25 Birds (Start Arrival)
+        </button>
+
+        <!-- Cohesion Slider --><div class="flex items-center space-x-3 w-full md:w-auto">
+            <label for="cohesionFactor" class="control-label text-sm font-medium">Cohesion:</label>
+            <input type="range" id="cohesionFactor" min="0" max="2" step="0.05" value="1" class="w-full h-2 bg-gray-500 rounded-lg appearance-none cursor-pointer">
+        </div>
+
+        <!-- Separation Slider --><div class="flex items-center space-x-3 w-full md:w-auto">
+            <label for="separationFactor" class="control-label text-sm font-medium">Separation:</label>
+            <input type="range" id="separationFactor" min="0" max="2" step="0.05" value="1.5" class="w-full h-2 bg-gray-500 rounded-lg appearance-none cursor-pointer">
+        </div>
+
+        <!-- Alignment Slider --><div class="flex items-center space-x-3 w-full md:w-auto">
+            <label for="alignmentFactor" class="control-label text-sm font-medium">Alignment:</label>
+            <input type="range" id="alignmentFactor" min="0" max="2" step="0.05" value="1" class="w-full h-2 bg-gray-500 rounded-lg appearance-none cursor-pointer">
+        </div>
+    </div>
+    
+    <!-- Wind Controls - REDUCED PADDING, SPACING, AND MARGIN --><div class="flex flex-wrap items-center justify-center space-y-2 md:space-y-0 md:space-x-4 mb-3 p-3 bg-gray-700/50 rounded-xl shadow-lg">
+        <!-- Removed h2 margin for more space --><h2 class="text-xl font-semibold">Wind Settings:</h2>
+        
+        <!-- Wind Speed Input --><div class="flex items-center space-x-3 w-full md:w-auto">
+            <label for="windSpeed" class="control-label text-sm font-medium">Speed (Knots):</label>
+            <input type="number" id="windSpeed" min="0" max="20" value="0" class="w-20 bg-gray-600 rounded-lg text-center p-1 text-sm focus:ring-blue-500 focus:border-blue-500">
+        </div>
+        
+        <!-- Wind Direction Selection --><div class="flex items-center space-x-4 w-full md:w-auto">
+            <label class="control-label text-sm font-medium">Wind Origin:</label>
+            <div class="flex space-x-3">
+                <label class="inline-flex items-center cursor-pointer">
+                    <input type="radio" name="windSource" value="left" id="windFromLeft" checked class="form-radio text-blue-500 bg-gray-600 border-gray-500">
+                    <span class="ml-2">From Left (Push Right)</span>
+                </label>
+                <label class="inline-flex items-center cursor-pointer">
+                    <input type="radio" name="windSource" value="right" id="windFromRight" class="form-radio text-blue-500 bg-gray-600 border-gray-500">
+                    <span class="ml-2">From Right (Push Left)</span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <!-- Canvas Container --><div id="canvas-container" class="flex-grow min-h-0">
+        <canvas id="simulationCanvas" class="w-full h-full"></canvas>
+    </div>
+
+    <script>
+        // Global Constants and Setup
+        const canvas = document.getElementById('simulationCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // UI Element References
+        const birdCountInput = document.getElementById('birdCount');
+        const currentBirdCountSpan = document.getElementById('currentBirdCount');
+        const arrivedCountSpan = document.getElementById('arrivedCount');
+        const cohesionFactorInput = document.getElementById('cohesionFactor');
+        const separationFactorInput = document.getElementById('separationFactor');
+        const alignmentFactorInput = document.getElementById('alignmentFactor');
+        const windSpeedInput = document.getElementById('windSpeed');
+        const windFromLeftInput = document.getElementById('windFromLeft');
+        const windFromRightInput = document.getElementById('windFromRight');
+        const addBirdsButton = document.getElementById('addBirdsButton'); 
+
+        // Physics constants
+        const MAX_SPEED = 2.5; 
+        const PERCEPTION_RADIUS = 50;
+        const BIRD_SIZE = 2; 
+        const EDGE_MARGIN = 50; 
+        const BOTTOM_EDGE_MARGIN_MULTIPLIER = 2; // Multiplier for the bottom edge boundary (Requested in previous turn)
+        const ARRIVAL_INTERVAL_MS = 310; 
+        const ROOST_TARGET_FORCE = 0.15; // Force for roosting (Requested to be faster)
+        const ROOST_STOPPING_RADIUS = 10; // New: Distance from roosting site to stop
+        const ROOST_PEEL_INTERVAL_MS = 1000; // New: Time between birds peeling off
+        const WIND_SCALE_FACTOR = 0.005; 
+        const ARRIVAL_SLOW_RADIUS = 100; 
+        const INSTANT_ADD_COUNT = 25; 
+
+        // NEW Roost Goal Constants
+        const ROOST_GOAL_RADIUS = 250; // Distance from roosting site where flock starts feeling the pull
+        const ROOST_GOAL_FORCE_MULTIPLIER = 0.05; // Gentle pull towards the tree
+
+        // Utility: Vector Class (simple implementation)
+        // MOVED CLASS DEFINITION TO THE TOP TO AVOID REFERENCE ERROR
+        class Vector {
+            constructor(x, y) {
+                this.x = x || 0;
+                this.y = y || 0;
+            }
+
+            add(other) {
+                return new Vector(this.x + other.x, this.y + other.y);
+            }
+
+            sub(other) {
+                return new Vector(this.x - other.x, this.y - other.y);
+            }
+
+            mult(scalar) {
+                return new Vector(this.x * scalar, this.y * scalar);
+            }
+
+            div(scalar) {
+                return new Vector(this.x / scalar, this.y / scalar);
+            }
+
+            mag() {
+                return Math.sqrt(this.x * this.x + this.y * this.y);
+            }
+
+            setMag(magnitude) {
+                if (this.mag() === 0) return new Vector(magnitude, 0);
+                return this.normalize().mult(magnitude);
+            }
+
+            normalize() {
+                const m = this.mag();
+                if (m === 0) return new Vector(0, 0);
+                return this.div(m);
+            }
+
+            limit(max) {
+                if (this.mag() > max) {
+                    return this.setMag(max);
+                }
+                return new Vector(this.x, this.y);
+            }
+        }
+
+        // Global State Variables
+        let birds = [];
+        let attractionPoint = null; 
+        let additionInterval = null; 
+        let peelInterval = null; 
+        let targetBirdCount = 100;
+        let isFlockFormed = false; 
+        let roostingSite = new Vector(0, 0); 
+
+
+        // Bird (Boid) Class
+        class Bird {
+            constructor(x, y) {
+                this.position = new Vector(x, y);
+                this.velocity = new Vector(Math.random() * 2 - 1, Math.random() * 2 - 1).setMag(Math.random() * MAX_SPEED);
+                this.acceleration = new Vector(0, 0);
+                this.color = '#FFFFFF'; // White silhouette
+                this.radius = BIRD_SIZE;
+                this.roostingState = 'FLOCKING'; // 'FLOCKING', 'ROOSTING', or 'ROOSTED'
+            }
+
+            getNeighbors(birds) {
+                const neighbors = [];
+                // Only consider birds that are still actively flocking
+                for (let other of birds) {
+                    // Include 'ROOSTING' birds in neighbors to prevent collisions, 
+                    // but exclude 'ROOSTED' as they are stationary and just part of the environment.
+                    if (other !== this && other.roostingState !== 'ROOSTED') { 
+                        const distance = this.position.sub(other.position).mag();
+                        if (distance < PERCEPTION_RADIUS) {
+                            neighbors.push(other);
+                        }
+                    }
+                }
+                return neighbors;
+            }
+
+            cohesion(neighbors, factor) {
+                if (neighbors.length === 0) return new Vector(0, 0);
+                let centerOfMass = new Vector(0, 0);
+                for (let other of neighbors) {
+                    centerOfMass = centerOfMass.add(other.position);
+                }
+                centerOfMass = centerOfMass.div(neighbors.length);
+                let steering = centerOfMass.sub(this.position);
+                steering = steering.setMag(MAX_SPEED);
+                steering = steering.sub(this.velocity);
+                steering = steering.limit(factor * 0.2); 
+                return steering;
+            }
+
+            separation(neighbors, factor) {
+                let steering = new Vector(0, 0);
+                let total = 0;
+
+                for (let other of neighbors) {
+                    const distance = this.position.sub(other.position).mag();
+                    if (distance > 0 && distance < this.radius * 4) { 
+                        let diff = this.position.sub(other.position);
+                        diff = diff.normalize().div(distance * distance); 
+                        steering = steering.add(diff);
+                        total++;
+                    }
+                }
+
+                if (total > 0) {
+                    steering = steering.div(total);
+                    steering = steering.setMag(MAX_SPEED);
+                    steering = steering.sub(this.velocity);
+                    steering = steering.limit(factor * 0.3); 
+                }
+                return steering;
+            }
+
+            alignment(neighbors, factor) {
+                if (neighbors.length === 0) return new Vector(0, 0);
+                let avgVelocity = new Vector(0, 0);
+                for (let other of neighbors) {
+                    avgVelocity = avgVelocity.add(other.velocity);
+                }
+                avgVelocity = avgVelocity.div(neighbors.length);
+
+                avgVelocity = avgVelocity.setMag(MAX_SPEED);
+                let steering = avgVelocity.sub(this.velocity);
+                steering = steering.limit(factor * 0.2); 
+                return steering;
+            }
+
+            avoidEdges() {
+                let desired = null;
+                const canvasWidth = canvas.width;
+                const canvasHeight = canvas.height;
+                const bottomMarginDistance = EDGE_MARGIN * BOTTOM_EDGE_MARGIN_MULTIPLIER;
+
+                // Left Edge
+                if (this.position.x < EDGE_MARGIN) {
+                    desired = new Vector(MAX_SPEED, this.velocity.y); 
+                // Right Edge
+                } else if (this.position.x > canvasWidth - EDGE_MARGIN) {
+                    desired = new Vector(-MAX_SPEED, this.velocity.y); 
+                }
+
+                // Top Edge
+                if (this.position.y < EDGE_MARGIN) {
+                    desired = new Vector(this.velocity.x, MAX_SPEED); 
+                // Bottom Edge (using the doubled margin)
+                } else if (this.position.y > canvasHeight - bottomMarginDistance) {
+                    desired = new Vector(this.velocity.x, -MAX_SPEED); 
+                }
+
+                if (desired !== null) {
+                    let steering = desired.sub(this.velocity);
+                    steering = steering.limit(0.15); 
+                    return steering;
+                }
+                return new Vector(0, 0);
+            }
+
+            seekAttraction(target) {
+                if (!target) return new Vector(0, 0);
+
+                let desired = target.sub(this.position);
+                desired = desired.setMag(MAX_SPEED);
+                
+                let steering = desired.sub(this.velocity);
+                steering = steering.limit(0.1); 
+                return steering;
+            }
+
+            applyForce(force) {
+                this.acceleration = this.acceleration.add(force);
+            }
+
+            flock(allBirds) {
+                // If a bird has roosted, it is completely static
+                if (this.roostingState === 'ROOSTED') {
+                    this.velocity = new Vector(0, 0);
+                    this.acceleration = new Vector(0, 0);
+                    return; 
+                }
+
+                const neighbors = this.getNeighbors(allBirds);
+                const cohesionFactor = parseFloat(cohesionFactorInput.value);
+                const separationFactor = parseFloat(separationFactorInput.value);
+                const alignmentFactor = parseFloat(alignmentFactorInput.value);
+
+                const sep = this.separation(neighbors, separationFactor);
+                const coh = this.cohesion(neighbors, cohesionFactor);
+                const ali = this.alignment(neighbors, alignmentFactor);
+                const edgeAvoidance = this.avoidEdges(); 
+                const attraction = this.seekAttraction(attractionPoint);
+                const windForce = calculateWindForce();
+
+                // 6. NEW: Roost Goal Force (Applies only if the bird is not actively peeling off)
+                let roostGoal = new Vector(0, 0);
+                if (this.roostingState === 'FLOCKING' && isFlockFormed) {
+                    const flockCenter = getFlockingCenter();
+                    if (flockCenter) {
+                        const distanceToRoost = flockCenter.sub(roostingSite).mag();
+                        
+                        if (distanceToRoost < ROOST_GOAL_RADIUS) {
+                            let desired = roostingSite.sub(this.position);
+                            // Scale the pull strength based on how close the flock is to the goal radius boundary
+                            const goalStrength = 1 - (distanceToRoost / ROOST_GOAL_RADIUS); // 1 when at center, 0 when at edge
+
+                            desired = desired.setMag(MAX_SPEED * goalStrength);
+                            
+                            let steering = desired.sub(this.velocity);
+                            steering = steering.limit(ROOST_GOAL_FORCE_MULTIPLIER);
+                            roostGoal = steering;
+                        }
+                    }
+                }
+
+                // Apply general forces
+                this.applyForce(sep);
+                this.applyForce(coh);
+                this.applyForce(ali);
+                this.applyForce(edgeAvoidance); 
+                this.applyForce(attraction);
+                this.applyForce(windForce);
+                this.applyForce(roostGoal);
+
+
+                // 7. Roosting Force - APPLIED ONLY TO THE SELECTED BIRD ('ROOSTING' state)
+                if (this.roostingState === 'ROOSTING') {
+                    let desired = roostingSite.sub(this.position);
+                    const distance = desired.mag(); 
+                    
+                    if (distance < ROOST_STOPPING_RADIUS) {
+                        // Roosted: Stop and mark as complete
+                        this.roostingState = 'ROOSTED';
+                        this.velocity = new Vector(0, 0);
+                        this.acceleration = new Vector(0, 0);
+                        this.color = '#AAAAAA'; // Greyed out color for roosted birds
+                        updateArrivedCount(); // Update the UI counter
+                        return;
+                    }
+
+                    if (distance > 0) {
+                        desired = desired.normalize(); 
+                        
+                        let speed = MAX_SPEED;
+                        // Slow down as it approaches the site
+                        if (distance < ARRIVAL_SLOW_RADIUS) {
+                            speed = MAX_SPEED * (distance / ARRIVAL_SLOW_RADIUS);
+                        }
+
+                        desired = desired.mult(speed); 
+                        
+                        let steering = desired.sub(this.velocity);
+                        // Use the strong ROOST_TARGET_FORCE to make it peel off quickly
+                        steering = steering.limit(ROOST_TARGET_FORCE);
+                        
+                        // Clear all previous accumulation and apply ONLY the steering toward the roost
+                        this.acceleration = new Vector(0, 0);
+                        this.applyForce(steering);
+                    }
+                }
+            }
+
+            update() {
+                // Roosted birds don't need to update physics
+                if (this.roostingState === 'ROOSTED') {
+                    return;
+                }
+                
+                this.velocity = this.velocity.add(this.acceleration);
+                this.velocity = this.velocity.limit(MAX_SPEED);
+                this.position = this.position.add(this.velocity);
+                this.acceleration = this.acceleration.mult(0); 
+
+                // Simple boundary clipping (though avoidEdges should handle steering)
+                this.position.x = Math.max(0, Math.min(canvas.width, this.position.x));
+                this.position.y = Math.max(0, Math.min(canvas.height, this.position.y));
+            }
+
+            draw() {
+                // Roosted birds are static, so the angle calculation only applies to moving birds
+                const angle = this.roostingState === 'FLOCKING' || this.roostingState === 'ROOSTING' 
+                    ? Math.atan2(this.velocity.y, this.velocity.x) 
+                    : 0; // No rotation for roosted birds
+                
+                const size = this.radius * 2.5; 
+                const width = this.radius * 1.5; 
+
+                ctx.save();
+                ctx.translate(this.position.x, this.position.y);
+                ctx.rotate(angle);
+
+                ctx.beginPath();
+                
+                // Draw a simple dot for roosted birds, V-shape for moving birds
+                if (this.roostingState === 'ROOSTED') {
+                    ctx.arc(0, 0, this.radius + 0.5, 0, Math.PI * 2);
+                    ctx.fillStyle = this.color; 
+                    ctx.fill();
+                } else {
+                    // V-shape silhouette for flying birds
+                    ctx.moveTo(size, 0); 
+                    ctx.lineTo(-size * 0.5, -width);
+                    ctx.lineTo(0, 0); 
+                    ctx.lineTo(-size * 0.5, width);
+                    ctx.lineTo(size, 0);
+                    ctx.fillStyle = this.color; 
+                    ctx.fill();
+                }
+
+                ctx.restore();
+            }
+        }
+
+        // --- Core Simulation Functions ---
+
+        /**
+         * Calculates the center of mass for all birds currently active (FLOCKING or ROOSTING).
+         * This is used to determine the flock's collective position relative to the roosting site.
+         */
+        function getFlockingCenter() {
+            let center = new Vector(0, 0);
+            const flockingBirds = birds.filter(b => b.roostingState === 'FLOCKING' || b.roostingState === 'ROOSTING');
+            
+            if (flockingBirds.length === 0) {
+                return null;
+            }
+            
+            for (const bird of flockingBirds) {
+                center = center.add(bird.position);
+            }
+            
+            return center.div(flockingBirds.length);
+        }
+
+        function resizeCanvas() {
+            const container = document.getElementById('canvas-container');
+            const rect = container.getBoundingClientRect();
+            
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+
+            // Tree Constants
+            const TRUNK_WIDTH = 16;
+            const CANOPY_RADIUS = 40;
+            const TREE_HEIGHT = 100;
+            const TREE_BASE_Y_OFFSET = 50;
+
+            // Roosting site is the center of the canopy, horizontally centered on the canvas
+            roostingSite = new Vector(
+                canvas.width / 2, 
+                canvas.height - TREE_BASE_Y_OFFSET - (TREE_HEIGHT * 0.3) + CANOPY_RADIUS / 4 
+            ); 
+        }
+
+        function drawSunset() {
+            // Draw a linear gradient from deep orange (bottom/horizon) to dark blue (top/sky)
+            const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            gradient.addColorStop(0, '#0f172a'); 
+            gradient.addColorStop(0.3, '#1e3a8a'); 
+            gradient.addColorStop(1, '#9a3412'); 
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // --- Roosting Tree Drawing (Horizontal Center, Bottom) ---
+            const TRUNK_WIDTH = 16;
+            const CANOPY_RADIUS = 40;
+            const TREE_HEIGHT = 100;
+            const TREE_BASE_Y_OFFSET = 50;
+
+            const treeBaseY = canvas.height - TREE_BASE_Y_OFFSET;
+            const treeCenterX = canvas.width / 2;
+            
+            // Draw Trunk
+            ctx.fillStyle = '#452a1a'; // Brown
+            ctx.fillRect(treeCenterX - TRUNK_WIDTH / 2, treeBaseY, TRUNK_WIDTH, -TREE_HEIGHT * 0.3);
+
+            // Draw Canopy
+            ctx.beginPath();
+            ctx.arc(treeCenterX, treeBaseY - TREE_HEIGHT * 0.3, CANOPY_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = '#1e381b'; // Dark Green/Brownish for sunset tree
+            ctx.fill();
+            ctx.closePath();
+            // --- End Roosting Tree ---
+        }
+
+        function calculateWindForce() {
+            const speedKnots = parseFloat(windSpeedInput.value) || 0;
+
+            if (speedKnots === 0) return new Vector(0, 0);
+
+            const scale = speedKnots * WIND_SCALE_FACTOR;
+            let xForce = 0;
+            
+            if (windFromLeftInput.checked) {
+                xForce = scale;
+            } else if (windFromRightInput.checked) {
+                xForce = -scale;
+            }
+            
+            return new Vector(xForce, 0);
+        }
+
+        function loop() {
+            drawSunset();
+
+            for (let bird of birds) {
+                bird.flock(birds);
+                bird.update();
+                bird.draw();
+            }
+
+            requestAnimationFrame(loop);
+        }
+
+        // NEW: Function to manage the sequential roosting process
+        function startRoostingPeel() {
+            if (peelInterval !== null) return; 
+
+            peelInterval = setInterval(() => {
+                // Find all birds that are still FLOCKING 
+                const flockingBirds = birds.filter(b => b.roostingState === 'FLOCKING');
+
+                if (flockingBirds.length > 0) {
+                    // Select a random bird from the active flock
+                    const birdToRoost = flockingBirds[Math.floor(Math.random() * flockingBirds.length)];
+                    
+                    // Set its state to ROOSTING, initiating the peel-off
+                    birdToRoost.roostingState = 'ROOSTING';
+
+                } else if (birds.length > 0 && birds.every(b => b.roostingState !== 'ROOSTING')) {
+                    // All birds are either ROOSTED or are currently ROOSTING. If none are ROOSTING, they must all be ROOSTED.
+                    clearInterval(peelInterval);
+                    peelInterval = null;
+                }
+            }, ROOST_PEEL_INTERVAL_MS);
+        }
+
+        // NEW: Function to update the roosted bird counter
+        function updateArrivedCount() {
+            const roostedCount = birds.filter(b => b.roostingState === 'ROOSTED').length;
+            arrivedCountSpan.textContent = `${roostedCount}`;
+        }
+
+        // --- Incremental Addition Logic ---
+        
+        function addSingleBird() {
+            if (birds.length < targetBirdCount) {
+                let startX;
+                let initialVelX;
+                
+                const isComingFromLeft = Math.random() < 0.5; 
+
+                if (isComingFromLeft) {
+                    startX = 0; 
+                    initialVelX = Math.random() * 0.5 + 0.5; 
+                } else {
+                    startX = canvas.width; 
+                    initialVelX = Math.random() * -0.5 - 0.5; 
+                }
+
+                const newBird = new Bird(
+                    startX, 
+                    Math.random() * canvas.height 
+                );
+
+                newBird.velocity = new Vector(
+                    initialVelX, 
+                    Math.random() * 2 - 1
+                ).setMag(Math.random() * MAX_SPEED); 
+
+                birds.push(newBird);
+
+            } else {
+                clearInterval(additionInterval);
+                additionInterval = null;
+                isFlockFormed = true; 
+                
+                // Start the peeling off process once the main flock has arrived
+                startRoostingPeel();
+            }
+        }
+        
+        function increaseTargetCount() {
+            const maxBirds = parseInt(birdCountInput.max, 10);
+            
+            let newTarget = targetBirdCount + INSTANT_ADD_COUNT;
+            
+            if (newTarget > maxBirds) {
+                newTarget = maxBirds;
+            }
+            
+            birdCountInput.value = newTarget;
+            handleBirdCountChange(); 
+        }
+
+        // --- Event Handlers ---
+
+        function handleBirdCountChange() {
+            const newCount = parseInt(birdCountInput.value, 10);
+            currentBirdCountSpan.textContent = newCount;
+            
+            targetBirdCount = newCount;
+            
+            if (targetBirdCount < birds.length) {
+                // If the target is lowered, immediately stop peeling and reset
+                if (additionInterval) {
+                    clearInterval(additionInterval);
+                    additionInterval = null;
+                }
+                if (peelInterval) {
+                    clearInterval(peelInterval);
+                    peelInterval = null;
+                }
+                
+                birds.length = targetBirdCount;
+                isFlockFormed = true; 
+                
+                // Reset states of remaining birds to FLOCKING if they were roosting
+                birds.forEach(b => { 
+                    b.roostingState = 'FLOCKING'; 
+                    b.color = '#FFFFFF';
+                });
+
+                updateArrivedCount();
+                startRoostingPeel(); // Start peeling for the new, smaller flock
+
+            } else if (targetBirdCount > birds.length && additionInterval === null) {
+                // Start arrival of new birds
+                isFlockFormed = false;
+                if (peelInterval) { // Stop peeling while new birds are arriving
+                    clearInterval(peelInterval);
+                    peelInterval = null;
+                }
+                additionInterval = setInterval(addSingleBird, ARRIVAL_INTERVAL_MS); 
+            } else if (targetBirdCount <= birds.length && additionInterval !== null) {
+                // Stop arrival if slider hits current count
+                clearInterval(additionInterval);
+                additionInterval = null;
+                isFlockFormed = true;
+                startRoostingPeel();
+            }
+            
+            updateArrivedCount();
+        }
+
+        // Mouse/Touch Tracking (Attraction Point)
+        let isDragging = false;
+
+        function getClientPos(event) {
+            if (event.touches) {
+                return { x: event.touches[0].clientX, y: event.touches[0].clientY };
+            }
+            return { x: event.clientX, y: event.clientY };
+        }
+
+        function handleStart(event) {
+            isDragging = true;
+            handleMove(event);
+        }
+
+        function handleMove(event) {
+            if (!isDragging) return;
+            const pos = getClientPos(event);
+            const rect = canvas.getBoundingClientRect();
+            
+            attractionPoint = new Vector(
+                pos.x - rect.left, 
+                pos.y - rect.top
+            );
+            event.preventDefault(); 
+        }
+
+        function handleEnd() {
+            isDragging = false;
+            attractionPoint = null; 
+        }
+
+        // Add Listeners
+        window.addEventListener('resize', () => {
+            resizeCanvas();
+        });
+        
+        birdCountInput.addEventListener('input', handleBirdCountChange);
+        addBirdsButton.addEventListener('click', increaseTargetCount); 
+
+        // Mouse/Touch Listeners for Attraction
+        canvas.addEventListener('mousedown', handleStart);
+        canvas.addEventListener('mousemove', handleMove);
+        canvas.addEventListener('mouseup', handleEnd);
+        canvas.addEventListener('mouseleave', handleEnd);
+
+        canvas.addEventListener('touchstart', handleStart);
+        canvas.addEventListener('touchmove', handleMove);
+        canvas.addEventListener('touchend', handleEnd);
+        canvas.addEventListener('touchcancel', handleEnd);
+
+
+        // Initialization
+        window.onload = () => {
+            resizeCanvas();
+            
+            loop(); 
+
+            // Initialize the UI and state
+            updateArrivedCount();
+
+            targetBirdCount = parseInt(birdCountInput.value, 10); 
+            handleBirdCountChange(); 
+        };
+
+    </script>
+</body>
+</html>
